@@ -1,11 +1,7 @@
 import copy
-import sys
-import unittest
-from pathlib import Path
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / 'src'))
+import pytest
 
 import app
 
@@ -23,78 +19,112 @@ INITIAL_DIRECTORIES = {
 }
 
 
-class TestSecretary(unittest.TestCase):
-    def setUp(self):
-        app.documents[:] = copy.deepcopy(INITIAL_DOCUMENTS)
-        app.directories.clear()
-        app.directories.update(copy.deepcopy(INITIAL_DIRECTORIES))
-
-    def test_check_document_existance_true(self):
-        self.assertTrue(app.check_document_existance('11-2'))
-
-    def test_check_document_existance_false(self):
-        self.assertFalse(app.check_document_existance('0000'))
-
-    def test_get_doc_owner_name(self):
-        self.assertEqual(app.get_doc_owner_name('10006'), 'Аристарх Павлов')
-
-    def test_get_doc_owner_name_unknown(self):
-        self.assertIsNone(app.get_doc_owner_name('unknown'))
-
-    @patch('builtins.input', return_value='11-2')
-    def test_get_doc_owner_name_from_input(self, _mocked_input):
-        self.assertEqual(app.get_doc_owner_name(), 'Геннадий Покемонов')
-
-    def test_get_all_doc_owners_names(self):
-        self.assertEqual(
-            app.get_all_doc_owners_names(),
-            {'Василий Гупкин', 'Геннадий Покемонов', 'Аристарх Павлов'},
-        )
-
-    def test_get_doc_shelf(self):
-        self.assertEqual(app.get_doc_shelf('10006'), '2')
-
-    def test_add_new_shelf(self):
-        shelf_number, created = app.add_new_shelf('4')
-        self.assertEqual(shelf_number, '4')
-        self.assertTrue(created)
-        self.assertIn('4', app.directories)
-        self.assertEqual(app.directories['4'], [])
-
-    def test_add_existing_shelf(self):
-        shelf_number, created = app.add_new_shelf('1')
-        self.assertEqual(shelf_number, '1')
-        self.assertFalse(created)
-
-    def test_add_new_doc(self):
-        shelf = app.add_new_doc('42', 'passport', 'Иван Иванов', '3')
-        self.assertEqual(shelf, '3')
-        self.assertTrue(app.check_document_existance('42'))
-        self.assertEqual(app.get_doc_owner_name('42'), 'Иван Иванов')
-        self.assertIn('42', app.directories['3'])
-
-    def test_delete_doc(self):
-        doc_number, deleted = app.delete_doc('11-2')
-        self.assertEqual(doc_number, '11-2')
-        self.assertTrue(deleted)
-        self.assertFalse(app.check_document_existance('11-2'))
-        self.assertNotIn('11-2', app.directories['1'])
-
-    def test_delete_unknown_doc(self):
-        doc_number, deleted = app.delete_doc('missing')
-        self.assertEqual(doc_number, 'missing')
-        self.assertFalse(deleted)
-
-    def test_show_document_info(self):
-        info = app.show_document_info(app.documents[0])
-        self.assertEqual(info, 'passport "2207 876234" "Василий Гупкин"')
-
-    def test_move_doc_to_shelf(self):
-        message = app.move_doc_to_shelf('10006', '3')
-        self.assertIn('10006', message)
-        self.assertEqual(app.get_doc_shelf('10006'), '3')
-        self.assertNotIn('10006', app.directories['2'])
+@pytest.fixture(autouse=True)
+def reset_secretary_data():
+    app.documents[:] = copy.deepcopy(INITIAL_DOCUMENTS)
+    app.directories.clear()
+    app.directories.update(copy.deepcopy(INITIAL_DIRECTORIES))
 
 
-if __name__ == '__main__':
-    unittest.main()
+@pytest.mark.parametrize(
+    'doc_number, expected',
+    [
+        ('2207 876234', True),
+        ('11-2', True),
+        ('10006', True),
+        ('0000', False),
+        ('unknown', False),
+    ],
+)
+def test_check_document_existance(doc_number, expected):
+    assert app.check_document_existance(doc_number) is expected
+
+
+@pytest.mark.parametrize(
+    'doc_number, expected_name',
+    [
+        ('2207 876234', 'Василий Гупкин'),
+        ('11-2', 'Геннадий Покемонов'),
+        ('10006', 'Аристарх Павлов'),
+        ('unknown', None),
+    ],
+)
+def test_get_doc_owner_name(doc_number, expected_name):
+    assert app.get_doc_owner_name(doc_number) == expected_name
+
+
+@pytest.mark.parametrize(
+    'doc_number, expected_shelf',
+    [
+        ('2207 876234', '1'),
+        ('11-2', '1'),
+        ('10006', '2'),
+        ('unknown', None),
+    ],
+)
+def test_get_doc_shelf(doc_number, expected_shelf):
+    assert app.get_doc_shelf(doc_number) == expected_shelf
+
+
+@pytest.mark.parametrize(
+    'shelf_number, expected_created',
+    [
+        ('4', True),
+        ('1', False),
+        ('2', False),
+    ],
+)
+def test_add_new_shelf(shelf_number, expected_created):
+    number, created = app.add_new_shelf(shelf_number)
+    assert number == shelf_number
+    assert created is expected_created
+    assert shelf_number in app.directories
+
+
+@pytest.mark.parametrize(
+    'doc_number, expected_deleted',
+    [
+        ('11-2', True),
+        ('10006', True),
+        ('missing', False),
+    ],
+)
+def test_delete_doc(doc_number, expected_deleted):
+    number, deleted = app.delete_doc(doc_number)
+    assert number == doc_number
+    assert deleted is expected_deleted
+    if expected_deleted:
+        assert app.check_document_existance(doc_number) is False
+
+
+def test_get_doc_owner_name_from_input():
+    with patch('builtins.input', return_value='11-2'):
+        assert app.get_doc_owner_name() == 'Геннадий Покемонов'
+
+
+def test_get_all_doc_owners_names():
+    assert app.get_all_doc_owners_names() == {
+        'Василий Гупкин',
+        'Геннадий Покемонов',
+        'Аристарх Павлов',
+    }
+
+
+def test_add_new_doc():
+    shelf = app.add_new_doc('42', 'passport', 'Иван Иванов', '3')
+    assert shelf == '3'
+    assert app.check_document_existance('42')
+    assert app.get_doc_owner_name('42') == 'Иван Иванов'
+    assert '42' in app.directories['3']
+
+
+def test_show_document_info():
+    info = app.show_document_info(app.documents[0])
+    assert info == 'passport "2207 876234" "Василий Гупкин"'
+
+
+def test_move_doc_to_shelf():
+    message = app.move_doc_to_shelf('10006', '3')
+    assert '10006' in message
+    assert app.get_doc_shelf('10006') == '3'
+    assert '10006' not in app.directories['2']
